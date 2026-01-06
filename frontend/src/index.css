@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-vibe-dark text-slate-200 antialiased;
+  }
+}
+
+/* Custom utilities if needed */
+.glass-panel {
+  @apply bg-vibe-card/80 backdrop-blur-md border border-white/10 shadow-xl;
+}

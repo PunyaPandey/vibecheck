@@ -118,9 +118,8 @@ def analyze_movie(title: str = Query(..., description="The title of the movie to
     )
 
     try:
-        # Use specific version to avoid alias issues
-        # Try gemini-1.5-flash-001 or gemini-pro if flash fails
-        model_name = 'gemini-1.5-flash-001' 
+        # User reported success with gemini-2.0-flash (curl test confirmed valid endpoint)
+        model_name = 'gemini-2.0-flash' 
         model = genai.GenerativeModel(model_name)
         response = model.generate_content(prompt)
         text_response = response.text

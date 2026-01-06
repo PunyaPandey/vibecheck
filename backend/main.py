@@ -38,6 +38,16 @@ else:
 if not TMDB_API_KEY:
     logger.warning("TMDB_API_KEY is not set.")
 
+@app.get("/list_models")
+def list_models():
+    if not GEMINI_API_KEY:
+         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set.")
+    try:
+        models = [m.name for m in genai.list_models()]
+        return {"models": models}
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Error listing models: {str(e)}")
+
 @app.get("/")
 def read_root():
     return {"message": "VibeCheck API is running"}
@@ -108,7 +118,10 @@ def analyze_movie(title: str = Query(..., description="The title of the movie to
     )
 
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Use specific version to avoid alias issues
+        # Try gemini-1.5-flash-001 or gemini-pro if flash fails
+        model_name = 'gemini-1.5-flash-001' 
+        model = genai.GenerativeModel(model_name)
         response = model.generate_content(prompt)
         text_response = response.text
         

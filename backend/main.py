@@ -126,12 +126,15 @@ def analyze_movie(title: str = Query(..., description="The title of the movie to
         logger.info(f"Bytez Raw Response: {text_response}")
 
         # specific cleaning for JSON
-        match = re.search(r'\{.*\}', text_response, re.DOTALL)
-        if match:
-            json_str = match.group(0)
-            analysis = json.loads(json_str)
+        if isinstance(text_response, dict):
+            analysis = text_response
         else:
-             analysis = json.loads(text_response)
+            match = re.search(r'\{.*\}', text_response, re.DOTALL)
+            if match:
+                json_str = match.group(0)
+                analysis = json.loads(json_str)
+            else:
+                 analysis = json.loads(text_response)
         
         return {
             "movie_title": movie_title,

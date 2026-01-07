@@ -91,62 +91,100 @@ def analyze_movie(title: str = Query(..., description="The title of the movie to
         # Proceed with empty reviews or fallback
         reviews = [movie.get("overview", "")]
 
-    # Step C: Analyze with Bytez
+    # Step C: Analyze with Bytez (Llama 3 + Flux)
     reviews_text = "\n\n".join(reviews)
-    # Truncate reviews safely
-    if len(reviews_text) > 5000:
-        reviews_text = reviews_text[:5000]
+    if len(reviews_text) > 4000:
+        reviews_text = reviews_text[:4000]
         
     prompt = (
         f"Analyze these reviews for the movie '{movie_title}'. "
         "Return a strictly valid JSON object (no markdown formatting, no comments) with keys: "
         "'sentiment_summary' (1 sentence string), 'vibe_tags' (list of 3-5 strings), "
-        "and 'intensity_score' (integer 1-10).\n\n"
+        "'intensity_score' (integer 1-10), "
+        "'visual_prompt' (string: a detailed, artistic description of a poster that captures the movie's vibe, suitable for an image generator).\n\n"
         f"Reviews:\n{reviews_text}"
     )
 
     try:
         logger.info("Initializing Bytez client...")
         sdk = Bytez(BYTEZ_API_KEY)
-        model = sdk.model("google/gemini-2.5-flash")
         
-        logger.info("Sending request to Bytez...")
-        results = model.run([
+        # 1. Text Analysis with Phi-3 Mini (Free Tier Compatible)
+        logger.info("Running text analysis with Phi-3 Mini...")
+        text_model = sdk.model("microsoft/Phi-3-mini-4k-instruct")
+        text_results = text_model.run([
             {
                 "role": "user",
                 "content": prompt
             }
         ])
         
-        if results.error:
-             logger.error(f"Bytez API Error: {results.error}")
-             raise Exception(f"Bytez API Error: {results.error}")
+        if text_results.error:
+             # Try fallback to raw string if error is just a structure issue, but usually error is API level
+             logger.error(f"Bytez Llama Error: {text_results.error}")
+             raise Exception(f"Bytez Llama Error: {text_results.error}")
 
-        text_response = results.output
-        logger.info(f"Bytez Raw Response: {text_response}")
+        text_response = text_results.output
+        logger.info(f"Llama Response: {text_response}")
 
-        # specific cleaning for JSON
+        # Parse JSON
+        analysis = {}
         if isinstance(text_response, dict):
             analysis = text_response
         else:
             match = re.search(r'\{.*\}', text_response, re.DOTALL)
             if match:
                 json_str = match.group(0)
-                analysis = json.loads(json_str)
-            else:
-                 analysis = json.loads(text_response)
+                try:
+                    analysis = json.loads(json_str)
+                except:
+                    pass
+            
+            if not analysis:
+                 try:
+                    analysis = json.loads(text_response)
+                 except:
+                    # Fallback if JSON fails
+                    analysis = {
+                        "sentiment_summary": "Vibes are mysterious...",
+                        "vibe_tags": ["Mystery", "Unknown"],
+                        "intensity_score": 5,
+                        "visual_prompt": f"A mysterious abstract poster for the movie {movie_title}"
+                    }
+
+        # 2. Image Generation with Flux
+        visual_prompt = analysis.get("visual_prompt", f"A creative poster for {movie_title}")
+        logger.info(f"Generating image with Flux. Prompt: {visual_prompt}")
+        
+        image_model = sdk.model("fal/FLUX.2-dev-Turbo")
+        image_results = image_model.run(visual_prompt)
+        
+        generated_image_url = None
+        if image_results.error:
+            logger.error(f"Flux Error: {image_results.error}")
+        else:
+            # Flux output is typically a URL string or a dict with url
+            img_out = image_results.output
+            if isinstance(img_out, dict):
+                generated_image_url = img_out.get("images", [{}])[0].get("url") or img_out.get("url")
+            elif isinstance(img_out, str):
+                generated_image_url = img_out # Assuming direct URL string
+            elif isinstance(img_out, list) and len(img_out) > 0:
+                 generated_image_url = img_out[0].get("url") if isinstance(img_out[0], dict) else img_out[0]
+
+        logger.info(f"Generated Image URL: {generated_image_url}")
         
         return {
             "movie_title": movie_title,
             "poster_url": poster_url,
-            "analysis": analysis
+            "analysis": analysis,
+            "generated_image_url": generated_image_url
         }
 
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON Parse Error. Response was: {text_response}. Error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to parse AI response")
     except Exception as e:
         logger.error(f"AI Analysis Error: {e}")
+        # Return partial results if AI fails? No, app expects structure.
+        # But we can return a fallback structure to avoid frontend crash
         raise HTTPException(status_code=500, detail=f"AI Analysis Error: {str(e)}")
 
 if __name__ == "__main__":

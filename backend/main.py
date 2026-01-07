@@ -5,7 +5,7 @@ import re
 import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from bytez import Bytez
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 # Configure logging
@@ -28,10 +28,10 @@ app.add_middleware(
 
 # API Keys
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY")
-BYTEZ_API_KEY = os.environ.get("BYTEZ_API_KEY")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-if not BYTEZ_API_KEY:
-    logger.warning("BYTEZ_API_KEY is not set.")
+if not GOOGLE_API_KEY:
+    logger.warning("GOOGLE_API_KEY is not set.")
 
 if not TMDB_API_KEY:
     logger.warning("TMDB_API_KEY is not set.")
@@ -44,7 +44,7 @@ def read_root():
 def analyze_movie(title: str = Query(..., description="The title of the movie to analyze")):
     logger.info(f"Received analysis request for title: {title}")
     
-    if not TMDB_API_KEY or not BYTEZ_API_KEY:
+    if not TMDB_API_KEY or not GOOGLE_API_KEY:
          logger.error("Missing API Keys")
          raise HTTPException(status_code=500, detail="Missing API Keys in environment")
 
@@ -91,87 +91,54 @@ def analyze_movie(title: str = Query(..., description="The title of the movie to
         # Proceed with empty reviews or fallback
         reviews = [movie.get("overview", "")]
 
-    # Step C: Analyze with Bytez (Llama 3 + Flux)
+    # Step C: Analyze with Gemini 1.5 Flash + Pollinations.ai
     reviews_text = "\n\n".join(reviews)
     if len(reviews_text) > 4000:
         reviews_text = reviews_text[:4000]
         
     prompt = (
-        f"Analyze these reviews for the movie '{movie_title}'. "
-        "Return a strictly valid JSON object (no markdown formatting, no comments) with keys: "
-        "'sentiment_summary' (1 sentence string), 'vibe_tags' (list of 3-5 strings), "
-        "'intensity_score' (integer 1-10), "
-        "'visual_prompt' (string: a detailed, artistic description of a poster that captures the movie's vibe, suitable for an image generator).\n\n"
+        f"You are a movie vibe analyst. Analyze these reviews for the movie '{movie_title}'. "
+        "Return a strictly valid JSON object (no markdown formatting, no comments) with the following keys:\n"
+        "- 'sentiment_summary': A 1-sentence summary of the general sentiment.\n"
+        "- 'vibe_tags': A list of 3-5 short string tags capturing the mood.\n"
+        "- 'intensity_score': An integer from 1 to 10.\n"
+        "- 'visual_prompt': A detailed, artistic description of a poster that captures the movie's vibe, suitable for an image generator.\n\n"
         f"Reviews:\n{reviews_text}"
     )
 
     try:
-        logger.info("Initializing Bytez client...")
-        sdk = Bytez(BYTEZ_API_KEY)
+        logger.info("Initializing Gemini client...")
+        genai.configure(api_key=GOOGLE_API_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
         
-        # 1. Text Analysis with Phi-3 Mini (Free Tier Compatible)
-        logger.info("Running text analysis with Phi-3 Mini...")
-        text_model = sdk.model("microsoft/Phi-3-mini-4k-instruct")
-        text_results = text_model.run([
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ])
-        
-        if text_results.error:
-             # Try fallback to raw string if error is just a structure issue, but usually error is API level
-             logger.error(f"Bytez Llama Error: {text_results.error}")
-             raise Exception(f"Bytez Llama Error: {text_results.error}")
-
-        text_response = text_results.output
-        logger.info(f"Llama Response: {text_response}")
+        # 1. Text Analysis with Gemini 1.5 Flash
+        logger.info("Running text analysis with Gemini 1.5 Flash...")
+        response = model.generate_content(prompt)
+        text_response = response.text
+        logger.info(f"Gemini Response: {text_response}")
 
         # Parse JSON
-        analysis = {}
-        if isinstance(text_response, dict):
-            analysis = text_response
-        else:
-            match = re.search(r'\{.*\}', text_response, re.DOTALL)
-            if match:
-                json_str = match.group(0)
-                try:
-                    analysis = json.loads(json_str)
-                except:
-                    pass
-            
-            if not analysis:
-                 try:
-                    analysis = json.loads(text_response)
-                 except:
-                    # Fallback if JSON fails
-                    analysis = {
-                        "sentiment_summary": "Vibes are mysterious...",
-                        "vibe_tags": ["Mystery", "Unknown"],
-                        "intensity_score": 5,
-                        "visual_prompt": f"A mysterious abstract poster for the movie {movie_title}"
-                    }
+        try:
+            analysis = json.loads(text_response)
+        except json.JSONDecodeError:
+             logger.error("Failed to parse Gemini JSON response")
+             # Fallback
+             analysis = {
+                "sentiment_summary": "Vibes are mysterious...",
+                "vibe_tags": ["Mystery", "Unknown"],
+                "intensity_score": 5,
+                "visual_prompt": f"A mysterious abstract poster for the movie {movie_title}"
+            }
 
-        # 2. Image Generation with Flux
+        # 2. Image Generation with Pollinations.ai (Free)
         visual_prompt = analysis.get("visual_prompt", f"A creative poster for {movie_title}")
-        logger.info(f"Generating image with Flux. Prompt: {visual_prompt}")
+        logger.info(f"Generating image with Pollinations.ai. Prompt: {visual_prompt}")
         
-        image_model = sdk.model("fal/FLUX.2-dev-Turbo")
-        image_results = image_model.run(visual_prompt)
+        # Pollinations is URL based, no API key needed
+        # We need to URL encode the prompt
+        encoded_prompt = requests.utils.quote(visual_prompt)
+        generated_image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
         
-        generated_image_url = None
-        if image_results.error:
-            logger.error(f"Flux Error: {image_results.error}")
-        else:
-            # Flux output is typically a URL string or a dict with url
-            img_out = image_results.output
-            if isinstance(img_out, dict):
-                generated_image_url = img_out.get("images", [{}])[0].get("url") or img_out.get("url")
-            elif isinstance(img_out, str):
-                generated_image_url = img_out # Assuming direct URL string
-            elif isinstance(img_out, list) and len(img_out) > 0:
-                 generated_image_url = img_out[0].get("url") if isinstance(img_out[0], dict) else img_out[0]
-
         logger.info(f"Generated Image URL: {generated_image_url}")
         
         return {

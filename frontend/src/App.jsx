@@ -92,7 +92,7 @@ function App() {
 
                 {/* Footer credit */}
                 <div className="fixed bottom-4 text-gray-500 text-xs tracking-widest uppercase opacity-50 pointer-events-none">
-                    Powered by Phi-3 Mini & Flux
+                    Powered by Gemini 1.5 Flash & Pollinations.ai
                 </div>
             </div>
         </SpotlightBackground>

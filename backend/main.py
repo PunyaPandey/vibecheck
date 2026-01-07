@@ -113,9 +113,34 @@ def analyze_movie(title: str = Query(..., description="The title of the movie to
         
         # 1. Text Analysis with Gemini 1.5 Flash
         logger.info("Running text analysis with Gemini 1.5 Flash...")
-        response = model.generate_content(prompt)
-        text_response = response.text
-        logger.info(f"Gemini Response: {text_response}")
+        text_response = None
+        
+        # List of models to try in order
+        models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-001', 'gemini-1.5-flash-latest', 'gemini-pro']
+        
+        for model_name in models_to_try:
+            try:
+                logger.info(f"Attempting to use model: {model_name}")
+                model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json"})
+                response = model.generate_content(prompt)
+                text_response = response.text
+                logger.info(f"Gemini Response from {model_name}: {text_response}")
+                break # Success
+            except Exception as e:
+                logger.warning(f"Failed with model {model_name}: {e}")
+                if "404" in str(e) or "not found" in str(e).lower():
+                    # Only list models once if real 404
+                    if model_name == models_to_try[0]:
+                        try:
+                            logger.info("Listing available models to debug 404:")
+                            for m in genai.list_models():
+                                logger.info(f" - {m.name}")
+                        except Exception as list_err:
+                            logger.error(f"Could not list models: {list_err}")
+                continue # Try next model
+        
+        if not text_response:
+             raise Exception("All Gemini models failed.")
 
         # Parse JSON
         try:

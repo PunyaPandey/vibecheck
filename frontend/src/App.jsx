@@ -74,7 +74,7 @@ function App() {
                         <div className="mb-6">
                             <h3 className="text-sm uppercase tracking-wider text-gray-500 font-semibold mb-2">Vibe Tags</h3>
                             <div className="flex flex-wrap gap-2">
-                                {result.analysis.vibe_tags.map((tag, index) => (
+                                {(result.analysis.vibe_tags || []).map((tag, index) => (
                                     <span key={index} className="px-3 py-1 bg-gray-700 rounded-full text-sm text-purple-300 border border-gray-600">
                                         #{tag}
                                     </span>
